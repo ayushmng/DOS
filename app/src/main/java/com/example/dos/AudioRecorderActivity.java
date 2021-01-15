@@ -189,39 +189,18 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
                 audioRecord.startRecording();
                 isRecording = true;
 
-                recordingThread = new Thread(new Runnable() {
-                    public void run() {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-//                                writeAudioDataToFile();
-                                 /*Handler handler = new Handler();
-                                Runnable runnableCode = new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        handler.postDelayed(this, 800);
-                                    }
-                                };
-                                handler.post(runnableCode);*/
-                            }
-                        });
-                    }
-                }, "AudioRecorder Thread");
-                recordingThread.start();
-
                 AsyncTask.execute(() -> {
                     while (isRecording) {
                         short[] sData = new short[BufferElements2Rec];
                         audioRecord.read(sData, 0, BufferElements2Rec);
-//                                    System.out.println("Short writing to file" + Arrays.toString(sData));
                         byte[] bData = short2byte(sData);
 //                        Log.i(TAG, "Byte data: " + Arrays.toString(bData));
 
-//                        RecordTask recordTask = new RecordTask();
-//                        recordTask.execute();
+                        receiveValue(bData);
 
+//                        TestTask recordTask = new TestTask();
+//                        recordTask.execute(bData);
 //                        onBufferAvailable(bData);
-
                     }
                 });
 
@@ -481,9 +460,9 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
         recorder.setCallback(this);
         recorder.start();
 
-        AsyncTask.execute(new Runnable() {
-            @Override
-            public void run() {
+//        AsyncTask.execute(new Runnable() {
+//            @Override
+//            public void run() {
 
                 //Flag used for start of receiving
                 int listeningStarted = 0;
@@ -496,6 +475,8 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
                 //Flag used to know if data has been received before last synchronization bit
                 int lastInfo = 2;
                 myString = "";
+
+//                Log.i(TAG, "Output Value: " + Arrays.toString(value));
 
                 while (work) {
                     //Wait and get recorded data
@@ -515,69 +496,69 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
 
                     //Calculate frequency from recorded data
                     Log.i(TAG, "Output Value: " + Arrays.toString(value));
-                    double currNum = calculate(value, StartFrequency, EndFrequency, HalfPadd);
-
-                    //Check if listening started
-                    if (listeningStarted == 0) {
-                        //If listening didn't started and frequency is in range of StartHandshakeFrequency
-                        if ((currNum > (HandshakeStart - HalfPadd)) && (currNum < (HandshakeStart + HalfPadd))) {
-                            startCounter++;
-                            //If there were two StartHandshakeFrequency one after another start recording
-                            if (startCounter >= 2) {
-                                listeningStarted = 1;
-                            }
-                        } else {
-                            //If its not StartHandshakeFrequency reset counter
-                            startCounter = 0;
-                        }
-                    }
-                    //If listening started
-                    else {
-                        //Check if its StartHandshakeFrequency (used as synchronization bit) after receiving
-                        //starts
-                        if ((currNum > (HandshakeStart - HalfPadd)) && (currNum < (HandshakeStart + HalfPadd))) {
-                            //Reset flag for received data
-                            lastInfo = 2;
-                            //Reset end counter
-                            endCounter = 0;
-                        } else {
-                            //Check if its EndHandshakeFrequency
-                            if (currNum > (HandshakeEnd - HalfPadd)) {
-                                endCounter++;
-                                //If there were two EndHandshakeFrequency one after another stop recording if
-                                //chat message is expected fileName==null or if its data transfer and only name
-                                //has been received, reset counters and flags and start receiving file data.
-
-                                //TODO: this if condition is used for writing or creating file so it may not require
-                        /*if (endCounter >= 2) {
-                            if (fileName != null && namePartBArray == null) {
-                                namePartBArray = bitConverter.getAndResetReadBytes();
-                                listeningStarted = 0;
-                                startCounter = 0;
-                                endCounter = 0;
-                            } else {
-                                setWorkFalse();
-                            }
-                        }*/
-
-
-                            } else {
-                                //Reset end counter
-                                endCounter = 0;
-                                //Check if data has been received before last synchronization bit
-                                if (lastInfo != 0) {
-                                    //Set flag
-                                    lastInfo = 0;
-                                    //Add frequency to received frequencies
-                                    bitConverter.calculateBits(currNum);
-                                }
-                            }
-                        }
-                    }
+//                    double currNum = calculate(value, StartFrequency, EndFrequency, HalfPadd);
+//
+//                    //Check if listening started
+//                    if (listeningStarted == 0) {
+//                        //If listening didn't started and frequency is in range of StartHandshakeFrequency
+//                        if ((currNum > (HandshakeStart - HalfPadd)) && (currNum < (HandshakeStart + HalfPadd))) {
+//                            startCounter++;
+//                            //If there were two StartHandshakeFrequency one after another start recording
+//                            if (startCounter >= 2) {
+//                                listeningStarted = 1;
+//                            }
+//                        } else {
+//                            //If its not StartHandshakeFrequency reset counter
+//                            startCounter = 0;
+//                        }
+//                    }
+//                    //If listening started
+//                    else {
+//                        //Check if its StartHandshakeFrequency (used as synchronization bit) after receiving
+//                        //starts
+//                        if ((currNum > (HandshakeStart - HalfPadd)) && (currNum < (HandshakeStart + HalfPadd))) {
+//                            //Reset flag for received data
+//                            lastInfo = 2;
+//                            //Reset end counter
+//                            endCounter = 0;
+//                        } else {
+//                            //Check if its EndHandshakeFrequency
+//                            if (currNum > (HandshakeEnd - HalfPadd)) {
+//                                endCounter++;
+//                                //If there were two EndHandshakeFrequency one after another stop recording if
+//                                //chat message is expected fileName==null or if its data transfer and only name
+//                                //has been received, reset counters and flags and start receiving file data.
+//
+//                                //TODO: this if condition is used for writing or creating file so it may not require
+//                        /*if (endCounter >= 2) {
+//                            if (fileName != null && namePartBArray == null) {
+//                                namePartBArray = bitConverter.getAndResetReadBytes();
+//                                listeningStarted = 0;
+//                                startCounter = 0;
+//                                endCounter = 0;
+//                            } else {
+//                                setWorkFalse();
+//                            }
+//                        }*/
+//
+//
+//                            } else {
+//                                //Reset end counter
+//                                endCounter = 0;
+//                                //Check if data has been received before last synchronization bit
+//                                if (lastInfo != 0) {
+//                                    //Set flag
+//                                    lastInfo = 0;
+//                                    //Add frequency to received frequencies
+//                                    bitConverter.calculateBits(currNum);
+//                                }
+//                            }
+//                        }
+//                    }
                 }
 
                 //Convert received frequencies to bytes
-                byte[] readBytes = bitConverter.getAndResetReadBytes();
+/*                byte[] readBytes = bitConverter.getAndResetReadBytes();
                 try {
                     if (namePartBArray == null) {
                         //If its chat communication set message as return string
@@ -586,10 +567,11 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
-                }
+                }*/
 
-            }
-        });
+//            }
+//        });
+
     }
 
     //Called for calculating frequency with highest amplitude from sound sample
@@ -665,7 +647,7 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
     @Override
     public void onBufferAvailable(byte[] buffer) {
 
-        Log.i(TAG, "Buffer from interface: " + Arrays.toString(buffer));
+//        Log.i(TAG, "Buffer from interface: " + Arrays.toString(buffer));
 //        receiveValue(buffer);
 
         /*String recordedArraySem = "Semaphore";
@@ -683,6 +665,7 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
     }
 
     @Override
-    public void setBufferSize(int size) {}
+    public void setBufferSize(int size) {
+    }
 
 }
