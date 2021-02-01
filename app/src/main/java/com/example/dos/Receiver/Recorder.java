@@ -21,7 +21,8 @@ public class Recorder {
     //Callback used to set up filled buffer
     private Callback callback;
 
-    public Recorder() {}
+    public Recorder() {
+    }
 
     public Recorder(Callback callback) {
         this.callback = callback;
@@ -39,12 +40,13 @@ public class Recorder {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
                 //Gets minimum buffer size (can be larger)
                 int minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioEncoding);
-                int optimalBufSize=12000;
-                if(optimalBufSize<minBufferSize){
-                    optimalBufSize=minBufferSize;
+                int optimalBufSize = 12000;
+                if (optimalBufSize < minBufferSize) {
+                    optimalBufSize = minBufferSize;
                 }
                 //Sets the chosen buffer size in analyzing (father) activity
                 callback.setBufferSize(optimalBufSize);
+
                 //Create recorder
                 AudioRecord recorder = new AudioRecord(audioSource, sampleRate, channelConfig, audioEncoding, optimalBufSize);
                 if (recorder.getState() == AudioRecord.STATE_UNINITIALIZED) {
@@ -61,6 +63,7 @@ public class Recorder {
                 }
                 recorder.stop();
                 recorder.release();
+
             }
         }, Recorder.class.getName());
         thread.start();

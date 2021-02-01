@@ -2,23 +2,22 @@ package com.example.dos.Receiver;
 
 import android.os.AsyncTask;
 import android.os.Process;
+import android.util.Log;
 
 import com.example.dos.FFT.Complex;
 import com.example.dos.FFT.FFT;
 import com.example.dos.Sender.BitFrequencyConverter;
 
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 import static android.os.Process.THREAD_PRIORITY_BACKGROUND;
 import static android.os.Process.THREAD_PRIORITY_MORE_FAVORABLE;
 
-public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callback {
+public class RecordTask extends AsyncTask<Void, Void, Void> implements Callback {
 
-    //Size of recorded samples
-    private int bufferSizeInBytes = 0;
+    private static final String TAG = "Record Task";
     //Working task flag
     private boolean work = true;
     //List of samples that need to be calculated
@@ -27,44 +26,46 @@ public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callba
     final private String recordedArraySem = "Semaphore";
     //Recorder task used for recording samples
     private Recorder recorder = null;
-    //Received message (after recording)
-    private String myString = "";
-    //Callback (father) activity where message is passed after recording
-//    private CallbackSendRec callbackRet;
-    //If data is being sent, this is name of directory where file should be saved
-    private String fileName = null;
+
+    private final MessagingInterface receiverInterface;
+
+    public RecordTask(MessagingInterface messagingInterface) {
+        this.receiverInterface = messagingInterface;
+    }
 
     @Override
-    protected Void doInBackground(Integer... integers) {
+    public Void doInBackground(Void... voids) {
+
         Process.setThreadPriority(THREAD_PRIORITY_BACKGROUND + THREAD_PRIORITY_MORE_FAVORABLE);
-        //Load passed settings arguments
-        int StartFrequency = integers[0];
-        int EndFrequency = integers[1];
-        int BitPerTone = integers[2];
+
+        int StartFrequency = 17500;
+        int EndFrequency = 20000;
+        int BitPerTone = 4;
 
         //Create list for recorded samples
         recordedArray = new ArrayList<ChunkElement>();
         //Create frequency to bit converter with specific parameters
         BitFrequencyConverter bitConverter = new BitFrequencyConverter(StartFrequency, EndFrequency, BitPerTone);
-        //Load chanel synchronization parameters
+        //Load channel synchronization parameters
         int HalfPadd = bitConverter.getPadding() / 2;
         int HandshakeStart = bitConverter.getHandshakeStartFreq();
         int HandshakeEnd = bitConverter.getHandshakeEndFreq();
+
         //Create recorder and start it
         recorder = new Recorder();
         recorder.setCallback(this);
         recorder.start();
+
         //Flag used for start of receiving
         int listeningStarted = 0;
         //Counter used to know when to start receiving
         int startCounter = 0;
         //Counter used to know when to end receiving
         int endCounter = 0;
-        //Used if file is being received for name part of file
-        byte[] namePartBArray = null;
         //Flag used to know if data has been received before last synchronization bit
         int lastInfo = 2;
-        myString = "";
+        //Received message (after recording)
+        String myString = "";
 
         while (work) {
             //Wait and get recorded data
@@ -81,7 +82,9 @@ public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callba
                 recordedArraySem.notifyAll();
             }
             //Calculate frequency from recorded data
+            Log.i(TAG, "Output Value: " + Arrays.toString(tempElem.getBuffer()));
             double currNum = calculate(tempElem.getBuffer(), StartFrequency, EndFrequency, HalfPadd);
+
             //Check if listening started
             if (listeningStarted == 0) {
                 //If listening didn't started and frequency is in range of StartHandshakeFrequency
@@ -90,8 +93,6 @@ public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callba
                     //If there were two StartHandshakeFrequency one after another start recording
                     if (startCounter >= 2) {
                         listeningStarted = 1;
-                        //Used to tell callback that receiving started
-                        publishProgress();
                     }
                 } else {
                     //If its not StartHandshakeFrequency reset counter
@@ -114,16 +115,12 @@ public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callba
                         //If there were two EndHandshakeFrequency one after another stop recording if
                         //chat message is expected fileName==null or if its data transfer and only name
                         //has been received, reset counters and flags and start receiving file data.
+
+                        //TODO: this if condition is used for writing or creating file so it may not require
                         if (endCounter >= 2) {
-                            if (fileName != null && namePartBArray == null) {
-                                namePartBArray = bitConverter.getAndResetReadBytes();
-                                listeningStarted = 0;
-                                startCounter = 0;
-                                endCounter = 0;
-                            } else {
-                                setWorkFalse();
-                            }
+                            setWorkFalse();
                         }
+
                     } else {
                         //Reset end counter
                         endCounter = 0;
@@ -142,35 +139,14 @@ public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callba
         //Convert received frequencies to bytes
         byte[] readBytes = bitConverter.getAndResetReadBytes();
         try {
-            if (namePartBArray == null) {
-                //If its chat communication set message as return string
-                myString = new String(readBytes, "UTF-8");
-            } else {
-                //If its data transfer create file on given location with created name that
-                //doesn't exist there and received extension. Fill it with received data.
-                //And return name of file to callback activity
-                String fileExtension = new String(namePartBArray, "UTF-8");
-                int tempCnt = 1;
-                boolean tempFlag = true;
-                File tempFile = null;
-                while (tempFlag) {
-                    myString = "receivedFile" + tempCnt + "." + fileExtension;
-                    String fullName = fileName + "/" + myString;
-                    tempFile = new File(fullName);
-                    if (!tempFile.exists()) {
-                        tempFlag = false;
-                    }
-                    tempCnt++;
-                }
-                tempFile.createNewFile();
-                BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(tempFile));
-                bos.write(readBytes);
-                bos.flush();
-                bos.close();
-            }
+            //If its chat communication set message as return string
+            myString = new String(readBytes, StandardCharsets.UTF_8);
+            receiverInterface.myMessage(myString);
+
         } catch (Exception e) {
             e.printStackTrace();
         }
+
         return null;
     }
 
@@ -213,27 +189,18 @@ public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callba
 
     }
 
-    //Called to inform callback activity that receiving finished
-    @Override
-    protected void onPostExecute(Void aVoid) {
-        super.onPostExecute(aVoid);
-        /*if (callbackRet != null) {
-            callbackRet.actionDone(CallbackSendRec.RECEIVE_ACTION, myString);
-        }*/
+    //Called to turn off task
+    public void setWorkFalse() {
+        if (recorder != null) {
+            recorder.stop();
+            recorder = null;
+        }
+        this.work = false;
     }
 
-    //Called to inform callback activity that receiving started
-    @Override
-    protected void onProgressUpdate(Void... values) {
-        super.onProgressUpdate(values);
-        /*if (callbackRet != null) {
-            callbackRet.receivingSomething();
-        }*/
-    }
-
-    //Called from recorder activity to put new samples
     @Override
     public void onBufferAvailable(byte[] buffer) {
+        recordedArray.clear();
         synchronized (recordedArraySem) {
             recordedArray.add(new ChunkElement(buffer));
             recordedArraySem.notifyAll();
@@ -247,26 +214,7 @@ public class RecordTask extends AsyncTask<Integer, Void, Void> implements Callba
         }
     }
 
-    //Called to turn off task
-    public void setWorkFalse() {
-        if (recorder != null) {
-            recorder.stop();
-            recorder = null;
-        }
-        this.work = false;
-    }
-
     @Override
-    public void setBufferSize(int size) {
-        bufferSizeInBytes = size;
-    }
-
-//    public CallbackSendRec getCallbackRet() {
-//        return callbackRet;
-//    }
-
-//    public void setCallbackRet(CallbackSendRec callbackRet) {
-//        this.callbackRet = callbackRet;
-//    }
+    public void setBufferSize(int size) {}
 
 }

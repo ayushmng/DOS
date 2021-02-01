@@ -1,7 +1,6 @@
 package com.example.dos;
 
 import android.content.pm.PackageManager;
-import android.media.AsyncPlayer;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
@@ -11,10 +10,10 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
-import android.telecom.Call;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TimePicker;
@@ -24,12 +23,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import com.example.dos.FFT.Complex;
-import com.example.dos.FFT.FFT;
-import com.example.dos.Receiver.Callback;
-import com.example.dos.Receiver.ChunkElement;
-import com.example.dos.Receiver.Recorder;
-import com.example.dos.Receiver.TestTask;
+import com.example.dos.Receiver.MessagingInterface;
+import com.example.dos.Receiver.RecordTask;
 import com.example.dos.Sender.BitFrequencyConverter;
 
 import java.io.File;
@@ -37,7 +32,6 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Timer;
@@ -46,7 +40,7 @@ import java.util.TimerTask;
 import static android.Manifest.permission.RECORD_AUDIO;
 import static android.Manifest.permission.WRITE_EXTERNAL_STORAGE;
 
-public class AudioRecorderActivity extends AppCompatActivity implements Callback {
+public class AudioRecorderActivity extends AppCompatActivity implements MessagingInterface {
 
     private static final String TAG = AudioRecorderActivity.class.getSimpleName();
 
@@ -56,19 +50,8 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
     private static final int RECORDER_CHANNELS_OUT = AudioFormat.CHANNEL_OUT_MONO;
     private static final int RECORDER_AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT;
     private AudioRecord audioRecord = null;
-    private Thread recordingThread = null;
     private boolean isRecording = false;
-
-    private double durationSec = 0.270;
-
-    //List of samples that need to be calculated
-    private ArrayList<ChunkElement> recordedArray;
-    //Recorder task used for recording samples
-    private Recorder recorder = null;
-    //Received message (after recording)
-    private String myString = "";
-    //Working task flag
-    private boolean work = true;
+    private boolean isListening = true;
 
     EditText editText;
     Button startBtn, playBtn, stopPlayBtn, sendBtn;
@@ -83,8 +66,14 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
         setContentView(R.layout.activity_audio_recorder);
 
         setButtonHandlers();
-        int intSize = AudioTrack.getMinBufferSize(RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING);
-        at = new AudioTrack(AudioManager.STREAM_MUSIC, RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING, intSize, AudioTrack.MODE_STREAM);
+        if (CheckPermissions()) {
+            int intSize = AudioTrack.getMinBufferSize(RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING);
+            at = new AudioTrack(AudioManager.STREAM_MUSIC, RECORDER_SAMPLERATE, RECORDER_CHANNELS_OUT, RECORDER_AUDIO_ENCODING, intSize, AudioTrack.MODE_STREAM);
+            runTask(true);
+        } else {
+            RequestPermissions();
+        }
+
     }
 
     private void setButtonHandlers() {
@@ -105,58 +94,34 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
         timePicker.setIs24HourView(true);
         timePicker.setCurrentHour(0); //By default it sets device time in timePicker so, it sets value manually
         timePicker.setCurrentMinute(0);
-        timePicker.setOnTimeChangedListener(new TimePicker.OnTimeChangedListener() {
-            @Override
-            public void onTimeChanged(TimePicker timePicker, int i, int i1) {
-                min = timePicker.getCurrentHour();
-                sec = timePicker.getCurrentMinute();
+        timePicker.setOnTimeChangedListener((timePicker1, i, i1) -> {
+            min = timePicker1.getCurrentHour();
+            sec = timePicker1.getCurrentMinute();
+        });
+
+        sendBtn.setOnClickListener(v -> {
+            String message = String.valueOf(editText.getText());
+            if (!message.isEmpty()) {
+                sendValue(message);
+            } else {
+                Toast.makeText(AudioRecorderActivity.this, "Message is empty", Toast.LENGTH_SHORT).show();
             }
         });
 
-        sendBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-
-                String message = String.valueOf(editText.getText());
-                if (!message.isEmpty()) {
-                    sendValue(message);
-                } else {
-                    Toast.makeText(AudioRecorderActivity.this, "Message is empty", Toast.LENGTH_SHORT).show();
-                }
+        playBtn.setOnClickListener(view -> AsyncTask.execute(() -> {
+            try {
+                PlayShortAudioFileViaAudioTrack(mFileName);
+            } catch (IOException e) {
+                e.printStackTrace();
             }
+        }));
+
+        startBtn.setOnClickListener(view -> {
+            Log.i(TAG, "Button clicked");
+            startRecording();
         });
 
-        playBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-
-                AsyncTask.execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            PlayShortAudioFileViaAudioTrack(mFileName);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                    }
-                });
-            }
-        });
-
-        startBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                Log.i(TAG, "Button clicked");
-                startRecording();
-            }
-        });
-
-        stopPlayBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                at.stop();
-            }
-        });
+        stopPlayBtn.setOnClickListener(view -> at.stop());
 
         /*stopBtn.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -188,20 +153,14 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
                 audioRecord.startRecording();
                 isRecording = true;
 
-                AsyncTask.execute(() -> {
+                /*AsyncTask.execute(() -> {
                     while (isRecording) {
-                        short[] sData = new short[BufferElements2Rec];
-                        audioRecord.read(sData, 0, BufferElements2Rec);
-                        byte[] bData = short2byte(sData);
-//                        Log.i(TAG, "Byte data: " + Arrays.toString(bData));
-
-//                        receiveValue(bData);
-
-                        TestTask recordTask = new TestTask();
-//                        recordTask.onBufferAvailable(bData);
-                        recordTask.execute();
+                        if (isListening) {
+                            RecordTask recordTask = new RecordTask(this);
+                            recordTask.execute();
+                        }
                     }
-                });
+                });*/
 
                 Log.i(TAG, "Min: " + min + " Sec: " + sec);
                 stopTimer(min, sec);
@@ -212,7 +171,7 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
     }
 
     //convert short to byte
-    private byte[] short2byte(short[] sData) {
+    /*private byte[] short2byte(short[] sData) {
         int shortArrsize = sData.length;
         byte[] bytes = new byte[shortArrsize * 2];
         for (int i = 0; i < shortArrsize; i++) {
@@ -221,10 +180,9 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
             sData[i] = 0;
         }
         return bytes;
+    }*/
 
-    }
-
-    private void writeAudioDataToFile() {
+    /*private void writeAudioDataToFile() {
         // Write the output audio in byte
 
         File folder = new File(Environment.getExternalStorageDirectory() +
@@ -270,19 +228,16 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
             Toast.makeText(AudioRecorderActivity.this, "Folder does not exist", Toast.LENGTH_SHORT).show();
         }
 
-    }
+    }*/
 
     private void stopTimer(int minute, int second) {
         Timer timer = new Timer();
         TimerTask timerTask = new TimerTask() {
             @Override
             public void run() {
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        startBtn.setEnabled(true);
-                        stopRecording();
-                    }
+                runOnUiThread(() -> {
+                    startBtn.setEnabled(true);
+                    stopRecording();
                 });
             }
         };
@@ -297,7 +252,6 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
             audioRecord.stop();
             audioRecord.release();
             audioRecord = null;
-            recordingThread = null;
             Toast.makeText(getApplicationContext(), "Recording Stopped", Toast.LENGTH_SHORT).show();
         }
     }
@@ -328,7 +282,6 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
         at.play();
         // Write the byte array to the track
         at.write(byteData, 0, byteData.length);
-//        at.write(byteData, 0, 600000);
         at.stop();
         at.release();
     }
@@ -343,6 +296,7 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
 
     private void sendValue(String msg) {
 
+        runTask(false);
         int startFreq = 17500; //17500
         int endFreq = 20000; //20000
         int bitsPerTone = 4; //4bits
@@ -350,9 +304,6 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
         //Create bit to frequency converter
         BitFrequencyConverter bitConverter = new BitFrequencyConverter(startFreq, endFreq, bitsPerTone);
         byte[] encodedMessage = msg.getBytes();
-
-        Log.i(TAG, "Encoded Message: " + Arrays.toString(encodedMessage));
-
         ArrayList<Integer> freqs = bitConverter.calculateFrequency(encodedMessage);
 
         int bufferSize = AudioTrack.getMinBufferSize(RECORDER_SAMPLERATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -362,24 +313,28 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
                 AudioTrack.MODE_STREAM);
         at.play();
 
-        //Calculate number of tones to be played
-        int currProgress = 0;
-        int allLength = freqs.size() * 2 + 4;
-
         //Start communication with start handshake
-        playTone((double) bitConverter.getHandshakeStartFreq(), durationSec);
-        playTone((double) bitConverter.getHandshakeStartFreq(), durationSec);
+        double durationSec = 0.270;
+        playTone(bitConverter.getHandshakeStartFreq(), durationSec);
+        playTone(bitConverter.getHandshakeStartFreq(), durationSec);
         //Transfer message if chat and file extension if data
         for (int freq : freqs) {
             //playTone((double)freq,durationSec);
-            playTone((double) freq, durationSec / 2);
-            playTone((double) bitConverter.getHandshakeStartFreq(), durationSec);
+            playTone(freq, durationSec / 2);
+            playTone(bitConverter.getHandshakeStartFreq(), durationSec);
         }
         //End communication with end handshake
-        playTone((double) bitConverter.getHandshakeEndFreq(), durationSec);
-        playTone((double) bitConverter.getHandshakeEndFreq(), durationSec);
+        playTone(bitConverter.getHandshakeEndFreq(), durationSec);
+        playTone(bitConverter.getHandshakeEndFreq(), durationSec);
         //If file is being send, send file data too
         at.release();
+
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                runTask(true);
+            }
+        }, 2000);
     }
 
     //Called to play tone of specific frequency for specific duration
@@ -439,187 +394,6 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
         }
     }
 
-    private void receiveValue(byte[] value) {
-
-        int StartFrequency = 17500;
-        int EndFrequency = 20000;
-        int BitPerTone = 4;
-
-        //Create list for recorded samples
-        recordedArray = new ArrayList<ChunkElement>();
-        //Create frequency to bit converter with specific parameters
-        BitFrequencyConverter bitConverter = new BitFrequencyConverter(StartFrequency, EndFrequency, BitPerTone);
-        //Load channel synchronization parameters
-        int HalfPadd = bitConverter.getPadding() / 2;
-        int HandshakeStart = bitConverter.getHandshakeStartFreq();
-        int HandshakeEnd = bitConverter.getHandshakeEndFreq();
-
-        //Create recorder and start it
-        recorder = new Recorder();
-        recorder.setCallback(this);
-        recorder.start();
-
-//        AsyncTask.execute(new Runnable() {
-//            @Override
-//            public void run() {
-
-                //Flag used for start of receiving
-                int listeningStarted = 0;
-                //Counter used to know when to start receiving
-                int startCounter = 0;
-                //Counter used to know when to end receiving
-                int endCounter = 0;
-                //Used if file is being received for name part of file
-                byte[] namePartBArray = null;
-                //Flag used to know if data has been received before last synchronization bit
-                int lastInfo = 2;
-                myString = "";
-
-                Log.i(TAG, "Output Value: " + Arrays.toString(value));
-
-//                while (work) {
-                    //Wait and get recorded data
-
-            /*ChunkElement tempElem;
-            synchronized (recordedArraySem) {
-                while (recordedArray.isEmpty()) {
-                    try {
-                        recordedArraySem.wait();
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-                tempElem = recordedArray.remove(0);
-                recordedArraySem.notifyAll();
-            }*/
-
-//                    Calculate frequency from recorded data
-                    Log.i(TAG, "Output Value: " + Arrays.toString(value));
-                    double currNum = calculate(value, StartFrequency, EndFrequency, HalfPadd);
-
-                    //Check if listening started
-                    if (listeningStarted == 0) {
-                        //If listening didn't started and frequency is in range of StartHandshakeFrequency
-                        if ((currNum > (HandshakeStart - HalfPadd)) && (currNum < (HandshakeStart + HalfPadd))) {
-                            startCounter++;
-                            //If there were two StartHandshakeFrequency one after another start recording
-                            if (startCounter >= 2) {
-                                listeningStarted = 1;
-                            }
-                        } else {
-                            //If its not StartHandshakeFrequency reset counter
-                            startCounter = 0;
-                        }
-                    }
-                    //If listening started
-                    else {
-                        //Check if its StartHandshakeFrequency (used as synchronization bit) after receiving
-                        //starts
-                        if ((currNum > (HandshakeStart - HalfPadd)) && (currNum < (HandshakeStart + HalfPadd))) {
-                            //Reset flag for received data
-                            lastInfo = 2;
-                            //Reset end counter
-                            endCounter = 0;
-                        } else {
-                            //Check if its EndHandshakeFrequency
-                            if (currNum > (HandshakeEnd - HalfPadd)) {
-                                endCounter++;
-                                //If there were two EndHandshakeFrequency one after another stop recording if
-                                //chat message is expected fileName==null or if its data transfer and only name
-                                //has been received, reset counters and flags and start receiving file data.
-
-                                //TODO: this if condition is used for writing or creating file so it may not require
-                        /*if (endCounter >= 2) {
-                            if (fileName != null && namePartBArray == null) {
-                                namePartBArray = bitConverter.getAndResetReadBytes();
-                                listeningStarted = 0;
-                                startCounter = 0;
-                                endCounter = 0;
-                            } else {
-                                setWorkFalse();
-                            }
-                        }*/
-
-                            } else {
-                                //Reset end counter
-                                endCounter = 0;
-                                //Check if data has been received before last synchronization bit
-                                if (lastInfo != 0) {
-                                    //Set flag
-                                    lastInfo = 0;
-                                    //Add frequency to received frequencies
-                                    bitConverter.calculateBits(currNum);
-                                }
-                            }
-                        }
-                    }
-//                }
-
-                //Convert received frequencies to bytes
-                byte[] readBytes = bitConverter.getAndResetReadBytes();
-                try {
-                    if (namePartBArray == null) {
-                        //If its chat communication set message as return string
-                        myString = new String(readBytes, StandardCharsets.UTF_8);
-                        Log.i(TAG, "Output string: " + myString);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-
-//            }
-//        });
-
-    }
-
-    //Called for calculating frequency with highest amplitude from sound sample
-    private double calculate(byte[] buffer, int StartFrequency, int EndFrequency, int HalfPad) {
-        int analyzedSize = 1024;
-        Complex[] fftTempArray1 = new Complex[analyzedSize];
-        int tempI = -1;
-        //Convert sound sample from byte to Complex array
-        for (int i = 0; i < analyzedSize * 2; i += 2) {
-            short buff = buffer[i + 1];
-            short buff2 = buffer[i];
-            buff = (short) ((buff & 0xFF) << 8);
-            buff2 = (short) (buff2 & 0xFF);
-            short tempShort = (short) (buff | buff2);
-            tempI++;
-            fftTempArray1[tempI] = new Complex(tempShort, 0);
-        }
-        //Do fast fourier transform
-        final Complex[] fftArray1 = FFT.fft(fftTempArray1);
-        //Calculate position in array where analyzing should start and end
-
-        int startIndex1 = ((StartFrequency - HalfPad) * (analyzedSize)) / 44100;
-        int endIndex1 = ((EndFrequency + HalfPad) * (analyzedSize)) / 44100;
-
-        int max_index1 = startIndex1;
-        double max_magnitude1 = (int) fftArray1[max_index1].abs();
-        double tempMagnitude;
-        //Find position of frequency with highest amplitude
-
-
-        for (int i = startIndex1; i < endIndex1; ++i) {
-            tempMagnitude = fftArray1[i].abs();
-            if (tempMagnitude > max_magnitude1) {
-                max_magnitude1 = (int) tempMagnitude;
-                max_index1 = i;
-            }
-        }
-        return 44100.0 * max_index1 / (analyzedSize);
-
-    }
-
-    //Called to turn off task
-    public void setWorkFalse() {
-        if (recorder != null) {
-            recorder.stop();
-            recorder = null;
-        }
-        this.work = false;
-    }
-
     public boolean CheckPermissions() {
         int result = ContextCompat.checkSelfPermission(getApplicationContext(), WRITE_EXTERNAL_STORAGE);
         int result1 = ContextCompat.checkSelfPermission(getApplicationContext(), RECORD_AUDIO);
@@ -628,6 +402,17 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
 
     private void RequestPermissions() {
         ActivityCompat.requestPermissions(this, new String[]{RECORD_AUDIO, WRITE_EXTERNAL_STORAGE}, 1);
+    }
+
+    private void runTask(boolean run) {
+        RecordTask recordTask = new RecordTask(AudioRecorderActivity.this);
+        if (run) {
+            isListening = true;
+            AsyncTask.execute(recordTask::execute);
+        } else {
+            isListening = false;
+            recordTask.setWorkFalse();
+        }
     }
 
     /*@Override
@@ -643,27 +428,19 @@ public class AudioRecorderActivity extends AppCompatActivity implements Callback
     }*/
 
     @Override
-    public void onBufferAvailable(byte[] buffer) {
+    public void myMessage(String message) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
 
-//        Log.i(TAG, "Buffer from interface: " + Arrays.toString(buffer));
-//        receiveValue(buffer);
-
-        /*String recordedArraySem = "Semaphore";
-        synchronized (recordedArraySem) {
-            recordedArray.add(new ChunkElement(buffer));
-            recordedArraySem.notifyAll();
-            while (recordedArray.size() > 100) {
-                try {
-                    recordedArraySem.wait();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                if (isListening) {
+                    Log.i(TAG, "Message: " + message);
+                    Toast.makeText(AudioRecorderActivity.this, message, Toast.LENGTH_SHORT).show();
                 }
             }
-        }*/
-    }
-
-    @Override
-    public void setBufferSize(int size) {
+        });
+        runTask(false);
+        runTask(true);
     }
 
 }

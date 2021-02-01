@@ -1,2 +1,3 @@
 rootProject.name = "DOS"
 include ':app'
+include ':mytoastlibrary'
